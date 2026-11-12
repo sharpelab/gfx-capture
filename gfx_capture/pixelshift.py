@@ -13,6 +13,9 @@ on the most detailed tile of the image and the one with the least colour
 checkerboarding (lowest total variation) wins. On a soft image all candidates
 look the same, and then the choice doesn't matter.
 
+The output gets a fixed +1 EV gain (GAIN_EV) and no tone curve, so brightness is
+comparable between merges; it looks a little flatter than the camera's JPEG.
+
 Usage:  python -m gfx_capture.pixelshift <folder with the 16 .RAF files>
 """
 
@@ -32,6 +35,7 @@ XYZ_FROM_SRGB = np.array([[0.4124564, 0.3575761, 0.1804375],
                           [0.0193339, 0.1191920, 0.9503041]])
 CHANNELS = ((0, (0,)), (1, (1, 3)), (2, (2,)))  # output R, G, B <- LibRaw colour indices
 PAD = 2
+GAIN_EV = 1.0  # fixed brightening, same for every merge (the camera's JPEG curve adds about this much)
 
 
 def _load(path: Path):
@@ -122,7 +126,7 @@ def merge(raf_paths, out_tif: Path, out_jpg: Path | None = None, progress=None) 
     colors, black, white = loaded[0]["colors"], loaded[0]["black"], loaded[0]["white"]
     wb = loaded[0]["wb"] / loaded[0]["wb"][1]
     matrix = _srgb_from_cam(loaded[0]["rgb_xyz"]) * wb.astype(np.float32)[None, :]  # WB, then camera -> sRGB
-    scale = 1.0 / (white - float(black.mean()))
+    scale = 2.0 ** GAIN_EV / (white - float(black.mean()))
     del loaded
 
     say("Merging pixel shift: finding frame offsets...")
@@ -143,12 +147,12 @@ def merge(raf_paths, out_tif: Path, out_jpg: Path | None = None, progress=None) 
 
     out_tif = Path(out_tif)
     tifffile.imwrite(out_tif, out, photometric="rgb",
-                     description=f"gfx-capture pixel-shift merge of {', '.join(p.name for p in paths[:4])}; offsets {offsets}")
+                     description=f"gfx-capture pixel-shift merge of {', '.join(p.name for p in paths[:4])}; offsets {offsets}; gain {GAIN_EV:+.1f} EV, no tone curve")
     if out_jpg:
         prev = Image.fromarray((out[::2, ::2] >> 8).astype(np.uint8))
         prev.save(out_jpg, quality=92)
     return {"tif": str(out_tif), "jpg": str(out_jpg) if out_jpg else None, "offsets": offsets,
-            "margin": margin, "size": (out.shape[1], out.shape[0])}
+            "margin": margin, "gain_ev": GAIN_EV, "size": (out.shape[1], out.shape[0])}
 
 
 def merge_folder(folder: Path, progress=None) -> dict:

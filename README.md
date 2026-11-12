@@ -33,7 +33,7 @@ Settings are kept in `%APPDATA%\gfx-capture\config.json`, and the log is in `%AP
 - The app runs the camera in *PC priority*. The camera's dials don't change exposure while it's connected; use the Exposure panel instead. *Auto* is the camera's Program mode.
 - Live view pauses for each shot. Expect about 10 s per capture with a 100 MP body (transfer plus the camera's busy time).
 - **Pixel shift** takes about 1.5 minutes and about 1.8 GB. The frames go into `<name>_pixelshift\`. Anything that moves during the 16 frames (vibration, drift) ruins the result.
-  - gfx-capture then merges the first 4 frames (whole-pixel shifts) into `<name>_pixelshift_color.tif`: a 16-bit sRGB TIFF at the sensor's native resolution, with real R, G and B measured at every pixel instead of interpolated. A half-size `_preview.jpg` is saved too. This takes about 40 s on a modest PC. There's no auto-brightening, so exposure is comparable between shots.
+  - gfx-capture then merges the first 4 frames (whole-pixel shifts) into `<name>_pixelshift_color.tif`: a 16-bit sRGB TIFF at the sensor's native resolution, with real R, G and B measured at every pixel instead of interpolated. A half-size `_preview.jpg` is saved too. This takes about 40 s on a modest PC. Brightness gets a fixed +1 stop and no contrast curve, so it's comparable between shots but looks a little flatter than the camera's JPEG.
   - To re-merge a folder: `python -m gfx_capture.pixelshift <folder>_pixelshift`
   - For the 400 MP version (which also uses the half-pixel frames), open the RAFs in Fujifilm's free *Pixel Shift Combiner*.
 - RAW-only cameras give only a `.RAF`. Set the camera to RAW + JPEG if you want a quick-look JPEG.
