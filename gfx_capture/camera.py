@@ -211,6 +211,26 @@ class CameraWorker(threading.Thread):
         self.live = False
         self._drain(leftover_dir)
 
+    def _ensure_single_drive(self, timeout: float = 20.0) -> None:
+        """Make sure the camera is in single-shot drive mode.
+
+        Right after a pixel shift the camera is BUSY for a while, and a normal release
+        in pixel-shift drive mode fails with SHOOT_ERROR, so retry until it takes.
+        """
+        sdk = self.sdk
+        end = time.time() + timeout
+        while True:
+            try:
+                if sdk.get_drive_mode() == xsdk.DRIVE_SINGLE:
+                    return
+                sdk.set_drive_mode(xsdk.DRIVE_SINGLE)
+                log.info("drive mode set back to single")
+            except SDKError as exc:
+                if exc.err == xsdk.ERR_COMMUNICATION or time.time() > end:
+                    raise
+            self._drain(None)
+            time.sleep(0.5)
+
     def _cmd_exposure(self, manual: bool, shutter: int | None = None, iso: int | None = None) -> None:
         sdk = self.sdk
         self._pause_live_view()
@@ -248,6 +268,7 @@ class CameraWorker(threading.Thread):
         sdk = self.sdk
         self._emit("progress", "Capturing...")
         self._pause_live_view(folder)
+        self._ensure_single_drive()
         sdk.release(xsdk.RELEASE_SHOOT_S1OFF)
         saved: list[Path] = []
 
@@ -279,9 +300,13 @@ class CameraWorker(threading.Thread):
 
             self._collect(save, expected=16, timeout=600, quiet=20.0, progress=True)
         finally:
-            for call in (lambda: sdk.release(xsdk.RELEASE_N_S1OFF), lambda: sdk.set_drive_mode(xsdk.DRIVE_SINGLE)):
-                try:
-                    call()
-                except SDKError:
-                    pass
+            try:
+                sdk.release(xsdk.RELEASE_N_S1OFF)
+            except SDKError as exc:
+                log.info("half-press release after pixel shift: %s", exc)
+            try:
+                self._ensure_single_drive()
+            except SDKError as exc:
+                log.error("could not leave pixel-shift drive mode: %s", exc)
+                self._emit("error", "Camera is still in pixel-shift mode; the next capture will retry switching back.")
         self._emit("captured", [str(p) for p in saved], True)
