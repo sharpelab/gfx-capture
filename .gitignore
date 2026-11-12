@@ -1,0 +1,13 @@
+__pycache__/
+*.egg-info/
+.venv/
+build/
+dist/
+# never commit Fujifilm SDK files (license forbids redistribution)
+*.dll
+*.DAT
+*.H
+*.h
+SDK*/
+*.RAF
+*.JPG
