@@ -8,6 +8,7 @@ import os
 import queue
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -112,7 +113,7 @@ class App:
         style.configure("Big.TButton", font=("Segoe UI", 13, "bold"), padding=8)
         self.capture_btn = ttk.Button(side, text="Capture  (Space)", style="Big.TButton", command=self.capture)
         self.capture_btn.grid(row=r, column=0, sticky="ew", pady=(14, 0)); r += 1
-        self.ps_btn = ttk.Button(side, text="Pixel shift (16 frames, ~1.5 min)", command=self.pixelshift)
+        self.ps_btn = ttk.Button(side, text="Pixel shift (~1.5 min + merge)", command=self.pixelshift)
         self.ps_btn.grid(row=r, column=0, sticky="ew", pady=(6, 0)); r += 1
         ttk.Button(side, text="Open folder", command=self.open_folder).grid(row=r, column=0, sticky="ew", pady=(6, 0)); r += 1
         self.progress = ttk.Label(side, text="", wraplength=SIDEBAR - 20)
@@ -194,8 +195,9 @@ class App:
 
     def pixelshift(self) -> None:
         if messagebox.askokcancel("Pixel shift", "Takes 16 frames (~1.8 GB) over about 1.5 minutes.\n"
-                                  "Keep the setup completely still.\n\nMerge the frames afterwards with "
-                                  "Fujifilm's Pixel Shift Combiner.", parent=self.root):
+                                  "Keep the setup completely still.\n\nAfterwards a full-colour TIFF is made "
+                                  "automatically (about a minute). For the 400 MP version, open the frames "
+                                  "in Fujifilm's Pixel Shift Combiner.", parent=self.root):
             self._start_shot("pixelshift")
 
     def send_exposure(self) -> None:
@@ -275,20 +277,51 @@ class App:
             self.progress.config(text=f"Pixel shift done: {len(paths)} frames in {first.parent.name}")
             self.last_label.config(text=f"{first.parent.name}\\ ({len(paths)} RAFs)")
             self.thumb.config(image="")
+            if len(paths) >= 4:
+                self.start_merge(first.parent)
             return
         self.progress.config(text="Saved " + ", ".join(Path(p).name for p in paths))
         self.last_label.config(text=first.stem)
         jpg = next((p for p in paths if p.upper().endswith(".JPG")), None)
         if jpg:
+            self.show_thumb(jpg)
+
+    def start_merge(self, folder: Path) -> None:
+        """Merge the pixel-shift frames into a full-colour TIFF on a background thread."""
+        try:
+            from . import pixelshift
+        except ImportError as exc:
+            self.progress.config(text=f"Pixel-shift merge unavailable ({exc}); install numpy, rawpy, tifffile.")
+            return
+
+        def run():
             try:
-                img = Image.open(jpg)
-                img.draft("RGB", (SIDEBAR - 40, 300))
-                img = img.convert("RGB")
-                img.thumbnail((SIDEBAR - 40, 300))
-                self._thumb = ImageTk.PhotoImage(img)
-                self.thumb.config(image=self._thumb)
-            except Exception:  # noqa: BLE001
-                log.exception("thumbnail failed")
+                info = pixelshift.merge_folder(folder, progress=lambda s: self.worker.events.put(("progress", s)))
+                self.worker.events.put(("merged", info))
+            except Exception as exc:  # noqa: BLE001
+                log.exception("pixel-shift merge failed")
+                self.worker.events.put(("error", f"pixel-shift merge failed: {exc}"))
+
+        threading.Thread(target=run, daemon=True, name="merge").start()
+
+    def ev_merged(self, info: dict) -> None:
+        tif = Path(info["tif"])
+        w, h = info["size"]
+        self.progress.config(text=f"Merged: {tif.name} ({w}x{h}, full colour)")
+        self.last_label.config(text=tif.name)
+        if info.get("jpg"):
+            self.show_thumb(info["jpg"])
+
+    def show_thumb(self, path: str) -> None:
+        try:
+            img = Image.open(path)
+            img.draft("RGB", (SIDEBAR - 40, 300))
+            img = img.convert("RGB")
+            img.thumbnail((SIDEBAR - 40, 300))
+            self._thumb = ImageTk.PhotoImage(img)
+            self.thumb.config(image=self._thumb)
+        except Exception:  # noqa: BLE001
+            log.exception("thumbnail failed")
 
     def ev_error(self, text: str) -> None:
         self.progress.config(text="Error: " + text)
